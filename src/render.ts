@@ -4,9 +4,7 @@ import React from 'react';
 import type { PreviewMeta, PreviewRenderOptions, PreviewTarget } from './types';
 
 const defaultRenderOptions: PreviewRenderOptions = {
-  width: 1200,
-  height: 630,
-  devicePixelRatio: 2,
+  devicePixelRatio: 1.5,
 };
 
 export interface RenderPreviewResult {
