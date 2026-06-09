@@ -1,0 +1,46 @@
+{
+  "name": "@fraqjs/takumi-preview",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Takumi template previewer",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.mjs",
+  "bin": {
+    "takumi-preview": "dist/index.mjs"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "tsx --test test/*.test.ts",
+    "prepack": "pnpm build"
+  },
+  "keywords": [],
+  "author": "fraqjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fraqjs/fraq.git"
+  },
+  "homepage": "https://fraq.ntqqrev.org/",
+  "license": "MIT",
+  "peerDependencies": {
+    "@fraqjs/fraq": "^0.8.2",
+    "@fraqjs/plugin-takumi": "^0.1.2",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@takumi-rs/helpers": "^1.7.0",
+    "@types/node": "^25.9.2",
+    "@types/react": "^19.2.15",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.4",
+    "chokidar": "^5.0.0",
+    "commander": "^15.0.0",
+    "hono": "^4.12.25",
+    "tsx": "^4.22.4"
+  }
+}
