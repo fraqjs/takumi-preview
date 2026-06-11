@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 
-import { renderErrorText, renderPreviewPage, serializeMeta } from './html';
+import { type PreviewErrorInfo, renderErrorText, renderPreviewPage, serializeMeta, toPreviewErrorInfo } from './html';
 import { loadPreviewTarget } from './loader';
 import { type RenderPreviewResult, renderPreview } from './render';
 import type { PreviewMeta } from './types';
@@ -30,55 +30,74 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
   const app = new Hono();
   let latestMeta: PreviewMeta | undefined;
   let latestError: unknown;
+  let latestErrorInfo: PreviewErrorInfo | undefined;
   let latestImage: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let watcher: PreviewWatcher | undefined;
   const sinks = new Set<EventSink>();
   // biome-ignore lint/suspicious/noConfusingVoidType: This type is used to allow both types of onChange handlers, which can return either void or a promise.
   let refreshQueue: Promise<void | RenderPreviewResult> = Promise.resolve();
 
-  async function renderAndCachePreview() {
-    const target = await loadPreviewTarget(options.filePath);
-    const result = await renderPreview(target);
+  function applyRenderSuccess(result: RenderPreviewResult, importedFilePaths: string[]) {
     latestMeta = result.meta;
     latestImage = result.image;
     latestError = undefined;
+    latestErrorInfo = undefined;
 
     if (!watcher) {
       watcher = createPreviewWatcher({
-        files: target.importedFilePaths,
-        onChange: async () => {
-          await refreshPreview();
+        files: importedFilePaths,
+        onChange: () => {
+          void refreshPreview();
         },
       });
     } else {
-      watcher.update(target.importedFilePaths);
+      watcher.update(importedFilePaths);
     }
+  }
 
-    return result;
+  function applyRenderError(error: unknown, importedFilePaths: string[] = [options.filePath]) {
+    latestError = error;
+    latestErrorInfo = toPreviewErrorInfo(error);
+    latestImage = Buffer.alloc(0);
+
+    if (!watcher) {
+      watcher = createPreviewWatcher({
+        files: importedFilePaths,
+        onChange: () => {
+          void refreshPreview();
+        },
+      });
+    }
+  }
+
+  async function renderAndCachePreview() {
+    try {
+      const target = await loadPreviewTarget(options.filePath);
+      const result = await renderPreview(target);
+      applyRenderSuccess(result, target.importedFilePaths);
+      return result;
+    } catch (error) {
+      applyRenderError(error);
+      return undefined;
+    }
   }
 
   async function refreshPreview() {
     try {
       const target = await loadPreviewTarget(options.filePath);
       const result = await renderPreview(target);
-      latestMeta = result.meta;
-      latestImage = result.image;
-      latestError = undefined;
-      if (watcher) {
-        watcher.update(target.importedFilePaths);
-      }
+      applyRenderSuccess(result, target.importedFilePaths);
       broadcast('reload', {});
       return result;
     } catch (error) {
-      latestError = error;
-      latestImage = Buffer.alloc(0);
+      applyRenderError(error);
       broadcast('reload', {});
-      throw error;
+      return undefined;
     }
   }
 
   function scheduleRefresh() {
-    refreshQueue = refreshQueue.then(() => refreshPreview()).catch(() => {});
+    refreshQueue = refreshQueue.then(() => refreshPreview());
     return refreshQueue;
   }
 
@@ -103,10 +122,10 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     }
 
     if (latestImage.byteLength === 0) {
-      try {
-        await scheduleRefresh();
-      } catch (error) {
-        return c.text(renderErrorText(error), 500);
+      await scheduleRefresh();
+
+      if (latestError) {
+        return c.text(renderErrorText(latestError), 500);
       }
     }
 
@@ -119,8 +138,13 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
   });
 
   app.get('/meta.json', (c) => {
-    if (latestError) {
-      return c.text(renderErrorText(latestError), 500);
+    if (latestErrorInfo) {
+      return c.json(
+        {
+          error: latestErrorInfo,
+        },
+        500,
+      );
     }
 
     if (!latestMeta) {

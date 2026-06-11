@@ -4,6 +4,20 @@ import { html } from 'hono/html';
 
 import type { PreviewMeta } from './types';
 
+import { fileURLToPath } from 'node:url';
+
+export interface PreviewErrorLocation {
+  filePath: string;
+  line: number;
+  column: number;
+}
+
+export interface PreviewErrorInfo {
+  message: string;
+  stack: string;
+  location?: PreviewErrorLocation;
+}
+
 export function renderPreviewPage(filePath: string) {
   return html`<!doctype html>${<PreviewPage filePath={filePath} />}`;
 }
@@ -47,14 +61,54 @@ function PreviewPage(props: { filePath: string }) {
 }
 
 export function renderErrorText(error: unknown) {
-  if (error instanceof Error) {
-    return error.stack ?? error.message;
-  }
-  return String(error);
+  const info = toPreviewErrorInfo(error);
+  const location = info.location ? `\n${formatPreviewErrorLocation(info.location)}` : '';
+  return `${info.message}${location}\n${info.stack}`;
 }
 
 export function serializeMeta(meta: PreviewMeta) {
   return JSON.stringify(meta, null, 2);
+}
+
+export function toPreviewErrorInfo(error: unknown): PreviewErrorInfo {
+  if (error instanceof Error) {
+    const stack = error.stack ?? error.message;
+    return {
+      message: error.message,
+      stack,
+      location: extractPreviewErrorLocation(stack),
+    };
+  }
+
+  const message = String(error);
+  return {
+    message,
+    stack: message,
+  };
+}
+
+function extractPreviewErrorLocation(stack: string) {
+  const lines = stack.split('\n');
+
+  for (const line of lines) {
+    const match = line.match(/\(?((?:file:\/\/\/)?[A-Za-z]:[\\/][^():\n]+|\/[^():\n]+):(\d+):(\d+)\)?/);
+    if (!match) {
+      continue;
+    }
+
+    const filePath = match[1].startsWith('file://') ? fileURLToPath(match[1]) : match[1];
+    return {
+      filePath,
+      line: Number(match[2]),
+      column: Number(match[3]),
+    };
+  }
+
+  return undefined;
+}
+
+function formatPreviewErrorLocation(location: PreviewErrorLocation) {
+  return `${location.filePath}:${location.line}:${location.column}`;
 }
 
 const previewCss = `
@@ -199,10 +253,13 @@ let reloadNonce = 0;
 
 async function loadMeta() {
   const response = await fetch('/meta.json?t=' + Date.now());
+  const payload = await response.json();
+
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw payload.error || new Error('Render failed');
   }
-  return await response.json();
+
+  return payload;
 }
 
 function showMeta(data) {
@@ -215,9 +272,28 @@ function showMeta(data) {
 }
 
 function showError(error) {
-  meta.textContent = 'Render failed';
+  const location = error && error.location
+    ? error.location.filePath + ':' + error.location.line + ':' + error.location.column
+    : '';
+  meta.textContent = location ? 'Render failed at ' + location : 'Render failed';
   errorBox.hidden = false;
-  errorBox.textContent = error.message || String(error);
+  const lines = [];
+
+  if (error && error.message) {
+    lines.push(error.message);
+  } else {
+    lines.push(String(error));
+  }
+
+  if (location) {
+    lines.push('', 'Location: ' + location);
+  }
+
+  if (error && error.stack && error.stack !== error.message) {
+    lines.push('', error.stack);
+  }
+
+  errorBox.textContent = lines.join('\\n');
 }
 
 async function reload() {
